@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, sys, subprocess, pathlib
+import json, os, sys, subprocess, pathlib, base64
 
 KEY_PATH = os.getenv("AWS_KEY_PATH")
 if not KEY_PATH:
@@ -96,9 +96,11 @@ def deploy_one(host: str, cluster: str):
         if r.returncode != 0:
             print(r.stdout); sys.exit(f"[{host}] Failed: {c}")
 
-    unit_contents = SERVICE_TPL.format(cluster=cluster).replace("\n", r"\n")
+    unit_text = SERVICE_TPL.format(cluster=cluster)
+    unit_b64  = base64.b64encode(unit_text.encode("utf-8")).decode("ascii")
+
     write_unit = (
-        f"echo -e '{unit_contents}' | sudo tee {SERVICE_PATH} >/dev/null && "
+        f"echo '{unit_b64}' | base64 -d | sudo tee {SERVICE_PATH} >/dev/null && "
         "sudo systemctl daemon-reload && "
         "sudo systemctl enable --now fastapi && "
         "sudo systemctl restart fastapi || true"
