@@ -20,16 +20,15 @@ if not AMI_ID:
             Name="/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
         )["Parameter"]["Value"]
     except Exception:
-        # Fallback to gp2 if gp3 not available in the region
         AMI_ID = ssm.get_parameter(
             Name="/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
         )["Parameter"]["Value"]
 
 def create_group(instance_type: str, count: int, cluster_tag: str):
-    round_robin = itertools.cycle(SUBNETS)
+    rr = itertools.cycle(SUBNETS)
     instances = []
     for _ in range(count):
-        subnet = next(round_robin)
+        subnet = next(rr)
         r = ec2.create_instances(
             ImageId=AMI_ID,
             InstanceType=instance_type,
