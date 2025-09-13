@@ -75,3 +75,9 @@ def create_cluster(instance_type, count, cluster_name):
             
     except botocore.exceptions.ClientError as e:
         print(f"Échec de la création du cluster '{cluster_name}'. Erreur : {e}")
+
+
+# --- Fonction principale ---
+if __name__ == "__main__":
+    create_cluster("t2.micro", 4, "Cluster-Micro")
+    create_cluster("t2.large", 4, "Cluster-Large")
