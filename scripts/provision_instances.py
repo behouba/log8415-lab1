@@ -15,12 +15,17 @@ ec2 = boto3.resource("ec2", region_name=REGION)
 ssm = boto3.client("ssm", region_name=REGION)
 
 if not AMI_ID:
-    AMI_ID = ssm.get_parameter(
-        Name="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64"
-    )["Parameter"]["Value"]
+    try:
+        AMI_ID = ssm.get_parameter(
+            Name="/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
+        )["Parameter"]["Value"]
+    except Exception:
+        # Fallback to gp2 if gp3 not available in the region
+        AMI_ID = ssm.get_parameter(
+            Name="/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
+        )["Parameter"]["Value"]
 
 def create_group(instance_type: str, count: int, cluster_tag: str):
-    # alternate subnets so instances spread across AZs
     round_robin = itertools.cycle(SUBNETS)
     instances = []
     for _ in range(count):
