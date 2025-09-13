@@ -27,16 +27,36 @@ def ssh(host, cmd):
 
 def scp_dir(host, local_path, remote_home="~"):
     return subprocess.run(
-        ["scp", "-o", "StrictHostKeyChecking=no", "-i", KEY_PATH, "-r", local_path, f"{SSH_USER}@{host}:{remote_home}"],
+        ["scp", "-o", "StrictHostKeyChecking=no", "-i", KEY_PATH, "-r",
+         local_path, f"{SSH_USER}@{host}:{remote_home}"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
     )
 
 with open("artifacts/instances.json") as f:
     instances = json.load(f)
 
+SERVICE_PATH = "/etc/systemd/system/fastapi.service"
+
+SERVICE_TPL = r"""[Unit]
+Description=FastAPI (Uvicorn) service
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/app
+Environment=CLUSTER_NAME={cluster}
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+"""
+
 def deploy_one(host: str, cluster: str):
     print(f"🚀 {host} ({cluster}) as {SSH_USER}")
 
+    # — make apt reliable on Jammy (CNF hook bug) —
     apt_prep = "sudo rm -f /etc/apt/apt.conf.d/50command-not-found || true"
     fix_lists = "sudo rm -rf /var/lib/apt/lists/* && sudo mkdir -p /var/lib/apt/lists/partial && sudo apt-get clean"
     apt_update = (
@@ -73,28 +93,26 @@ def deploy_one(host: str, cluster: str):
         if r.returncode != 0:
             print(r.stdout); sys.exit(f"[{host}] Failed: {c}")
 
-    # stop any old server
-    ssh(host, "pkill -f 'uvicorn .*main:app' || true")
-
-    start_cmd = (
-        "cd ~/app && "
-        f"nohup env CLUSTER_NAME={cluster} "
-        "python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 "
-        ">/tmp/uvicorn.log 2>&1 & disown || true"
+    unit_contents = SERVICE_TPL.format(cluster=cluster).replace("\n", r"\n")
+    write_unit = (
+        f"echo -e '{unit_contents}' | sudo tee {SERVICE_PATH} >/dev/null && "
+        "sudo systemctl daemon-reload && "
+        "sudo systemctl enable --now fastapi && "
+        "sudo systemctl restart fastapi || true"
     )
-    print(f"[{host}] $ {start_cmd}")
-    r = ssh(host, start_cmd)
+    print(f"[{host}] $ install systemd unit")
+    r = ssh(host, write_unit)
     if r.returncode != 0:
-        print(r.stdout); sys.exit(f"[{host}] Failed to start uvicorn")
+        print(r.stdout); sys.exit(f"[{host}] Failed to install/start systemd unit")
 
     ready_cmd = (
         f"for i in $(seq 1 60); do "
         f"  code=$(curl -s -o /dev/null -w %{{http_code}} http://127.0.0.1:8000/{cluster}); "
         f"  [ \"$code\" = 200 ] && echo READY && exit 0; "
         f"  sleep 1; "
-        f"done; echo NOT_READY; ps -ef | grep -i 'uvicorn .*main:app' | grep -v grep; "
-        f"ss -ltnp | grep ':8000' || true; "
-        f"tail -n 200 /tmp/uvicorn.log || true; exit 1"
+        f"done; echo NOT_READY;"
+        f"sudo systemctl --no-pager --full status fastapi || true; "
+        f"journalctl -u fastapi -n 120 --no-pager || true; exit 1"
     )
     print(f"[{host}] Waiting for app to become ready …")
     r = ssh(host, ready_cmd)
