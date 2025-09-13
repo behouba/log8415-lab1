@@ -1,59 +1,91 @@
 #!/usr/bin/env python3
-import json, os, subprocess, pathlib, sys
+# Ubuntu-only deploy: copy ./app to each instance, install deps, start uvicorn FROM ~/app,
+# and wait until /cluster{1|2} returns 200 to avoid ALB 502s.
+
+import json, os, sys, subprocess, pathlib
 
 KEY_PATH = os.getenv("AWS_KEY_PATH")
 if not KEY_PATH:
     sys.exit("Missing AWS_KEY_PATH")
 
-with open("artifacts/instances.json") as f:
-    INST = json.load(f)
-
 APP_SRC = pathlib.Path("app").resolve()
 
-def ssh(user, host, cmd):
-    base = ["ssh","-o","StrictHostKeyChecking=no","-i",KEY_PATH,f"{user}@{host}",cmd]
-    return subprocess.run(base, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+def ssh(host: str, cmd: str):
+    """Run a command on the host via SSH (Ubuntu user), using bash -lc for safe quoting."""
+    remote = f"bash -lc '{cmd}'"
+    return subprocess.run(
+        ["ssh", "-o", "StrictHostKeyChecking=no", "-i", KEY_PATH, f"ubuntu@{host}", remote],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
 
-def scp(user, host, src, dst):
-    base = ["scp","-o","StrictHostKeyChecking=no","-i",KEY_PATH,"-r",src,f"{user}@{host}:{dst}"]
-    return subprocess.run(base, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+def scp_dir(host: str, local_path: str, remote_home: str = "~"):
+    return subprocess.run(
+        ["scp", "-o", "StrictHostKeyChecking=no", "-i", KEY_PATH, "-r", local_path, f"ubuntu@{host}:{remote_home}"],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
 
-def detect_user(host):
-    for user in ["ec2-user","ubuntu"]:
-        r = ssh(user, host, "whoami")
-        if r.returncode == 0:
-            return user
-    raise RuntimeError(f"Could not SSH to {host} with ec2-user or ubuntu")
+with open("artifacts/instances.json") as f:
+    instances = json.load(f)
 
-def deploy_one(host, cluster):
-    user = detect_user(host)
-    print(f"{host} ({cluster}) as {user}")
+def deploy_one(host: str, cluster: str):
+    print(f"🚀 {host} ({cluster})")
 
+    # 0) Ensure basics (Ubuntu): python3, pip, curl (for readiness check)
     cmds = [
-        "sudo yum -y update || true",
-        "sudo apt-get update -y || true",
-        "sudo apt-get upgrade -y || true",
-        "sudo yum -y install python3 python3-pip || true",
-        "sudo apt-get install -y python3 python3-pip || true",
+        "sudo apt-get update -y",
+        "sudo apt-get install -y python3 python3-pip curl",
         "mkdir -p ~/app && rm -rf ~/app/*",
     ]
     for c in cmds:
-        ssh(user, host, c)
+        r = ssh(host, c)
+        if r.returncode != 0:
+            print(r.stdout); sys.exit(f"[{host}] Failed: {c}")
 
-    r = scp(user, host, str(APP_SRC), "~")
+    # 1) Copy app/
+    r = scp_dir(host, str(APP_SRC))
     if r.returncode != 0:
-        print(r.stdout); sys.exit(f"SCP failed to {host}")
+        print(r.stdout); sys.exit(f"[{host}] SCP failed")
 
-    ssh(user, host, "python3 -m pip install --upgrade pip")
-    ssh(user, host, "python3 -m pip install fastapi uvicorn")
+    # 2) Python deps
+    for c in [
+        "python3 -m pip install --upgrade pip",
+        "python3 -m pip install fastapi uvicorn",
+    ]:
+        r = ssh(host, c)
+        if r.returncode != 0:
+            print(r.stdout); sys.exit(f"[{host}] Failed: {c}")
 
-    ssh(user, host, "pkill -f 'uvicorn main:app' || true")
-    ssh(user, host,
-        f"nohup env CLUSTER_NAME={cluster} python3 -m uvicorn main:app "
-        "--host 0.0.0.0 --port 8000 >/tmp/uvicorn.log 2>&1 &")
+    # 3) Start uvicorn FROM ~/app so `main:app` imports correctly
+    r = ssh(host, "pkill -f 'uvicorn .*main:app' || true")
+    _ = r  # ignore result
 
-for inst in INST:
+    start_cmd = (
+        f"cd ~/app && "
+        f"nohup env CLUSTER_NAME={cluster} "
+        f"python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 "
+        f">/tmp/uvicorn.log 2>&1 &"
+    )
+    r = ssh(host, start_cmd)
+    if r.returncode != 0:
+        print(r.stdout); sys.exit(f"[{host}] Failed to start uvicorn")
+
+    # 4) Readiness: wait until /clusterX returns 200
+    ready_cmd = (
+        f"for i in $(seq 1 30); do "
+        f"  code=$(curl -s -o /dev/null -w %{{http_code}} http://127.0.0.1:8000/{cluster}); "
+        f"  [ \"$code\" = 200 ] && echo READY && exit 0; "
+        f"  sleep 1; "
+        f"done; echo NOT_READY; tail -n 120 /tmp/uvicorn.log; exit 1"
+    )
+    r = ssh(host, ready_cmd)
+    print(r.stdout, end="")
+    if r.returncode != 0:
+        sys.exit(f"[{host}] App did not become ready")
+
+for inst in instances:
     ip = inst.get("public_ip")
-    if ip:
-        deploy_one(ip, inst.get("cluster",""))
-print("Deployment complete on all instances.")
+    cluster = inst.get("cluster", "")
+    if ip and cluster:
+        deploy_one(ip, cluster)
+
+print("✅ Deployment complete (Ubuntu). Apps are listening on :8000 and healthy.")
