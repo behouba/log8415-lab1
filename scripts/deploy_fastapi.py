@@ -49,6 +49,10 @@ ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=2
 
+# Uncomment if you want file logs instead of journal:
+# StandardOutput=append:/var/log/fastapi.log
+# StandardError=append:/var/log/fastapi.log
+
 [Install]
 WantedBy=multi-user.target
 """
@@ -56,7 +60,6 @@ WantedBy=multi-user.target
 def deploy_one(host: str, cluster: str):
     print(f"🚀 {host} ({cluster}) as {SSH_USER}")
 
-    # — make apt reliable on Jammy (CNF hook bug) —
     apt_prep = "sudo rm -f /etc/apt/apt.conf.d/50command-not-found || true"
     fix_lists = "sudo rm -rf /var/lib/apt/lists/* && sudo mkdir -p /var/lib/apt/lists/partial && sudo apt-get clean"
     apt_update = (
