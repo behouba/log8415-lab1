@@ -66,9 +66,9 @@ def deploy_one(host: str, cluster: str):
 
     start_cmd = (
         "cd ~/app && "
-        f"setsid env CLUSTER_NAME={cluster} "
+        f"nohup env CLUSTER_NAME={cluster} "
         "python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 "
-        "</dev/null >/tmp/uvicorn.log 2>&1 & echo $! > /tmp/uvicorn.pid"
+        ">/tmp/uvicorn.log 2>&1 & disown || true"
     )
     print(f"[{host}] $ {start_cmd}")
     r = ssh(host, start_cmd)
@@ -76,11 +76,12 @@ def deploy_one(host: str, cluster: str):
         print(r.stdout); sys.exit(f"[{host}] Failed to start uvicorn")
 
     ready_cmd = (
-        f"for i in $(seq 1 30); do "
-        f"  code=$(curl -s -o /dev/null -w %{{http_code}} http://127.0.0.1:8000/{cluster}); "
-        f"  [ \"$code\" = 200 ] && echo READY && exit 0; "
-        f"  sleep 1; "
-        f"done; echo NOT_READY; tail -n 120 /tmp/uvicorn.log; exit 1"
+        "for i in $(seq 1 60); do "
+        "  code=$(curl -s -o /dev/null -w %{http_code} http://127.0.0.1:8000/"
+        + cluster +
+        "); [ \"$code\" = 200 ] && echo READY && exit 0; "
+        "  sleep 1; "
+        "done; echo NOT_READY; tail -n 200 /tmp/uvicorn.log; exit 1"
     )
     print(f"[{host}] Waiting for app to become ready …")
     r = ssh(host, ready_cmd)
