@@ -14,3 +14,14 @@ yum update -y
 yum install -y python3 python3-pip
 '''
 
+# --- Initialisation des clients Boto3 ---
+try:
+    ec2_client = boto3.client("ec2", region_name=REGION_NAME)
+    ec2_resource = boto3.resource("ec2", region_name=REGION_NAME)
+    print("Clients Boto3 initialisés avec succès.")
+except botocore.exceptions.NoCredentialsError:
+    print("Erreur: Les identifiants AWS ne sont pas configurés.")
+    exit(1)
+
+
+
