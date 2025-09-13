@@ -37,9 +37,20 @@ with open("artifacts/instances.json") as f:
 def deploy_one(host: str, cluster: str):
     print(f"🚀 {host} ({cluster}) as {SSH_USER}")
 
+    apt_prep = "sudo rm -f /etc/apt/apt.conf.d/50command-not-found || true"
+    fix_lists = "sudo rm -rf /var/lib/apt/lists/* && sudo mkdir -p /var/lib/apt/lists/partial && sudo apt-get clean"
+    apt_update = (
+        f"{apt_prep}; "
+        "sudo apt-get update -y "
+        "|| (" + fix_lists + " && sudo apt-get update -y) "
+        "|| true"
+    )
+
     setup_cmds = [
-        "sudo apt-get update -y",
-        "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-pip curl",
+        apt_update,
+        "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-pip curl "
+        "|| (" + fix_lists + " && sudo apt-get update -y && "
+        "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-pip curl)",
         "mkdir -p ~/app && rm -rf ~/app/*",
     ]
     for c in setup_cmds:
@@ -62,6 +73,7 @@ def deploy_one(host: str, cluster: str):
         if r.returncode != 0:
             print(r.stdout); sys.exit(f"[{host}] Failed: {c}")
 
+    # stop any old server
     ssh(host, "pkill -f 'uvicorn .*main:app' || true")
 
     start_cmd = (
@@ -76,12 +88,13 @@ def deploy_one(host: str, cluster: str):
         print(r.stdout); sys.exit(f"[{host}] Failed to start uvicorn")
 
     ready_cmd = (
-        "for i in $(seq 1 60); do "
-        "  code=$(curl -s -o /dev/null -w %{http_code} http://127.0.0.1:8000/"
-        + cluster +
-        "); [ \"$code\" = 200 ] && echo READY && exit 0; "
-        "  sleep 1; "
-        "done; echo NOT_READY; tail -n 200 /tmp/uvicorn.log; exit 1"
+        f"for i in $(seq 1 60); do "
+        f"  code=$(curl -s -o /dev/null -w %{{http_code}} http://127.0.0.1:8000/{cluster}); "
+        f"  [ \"$code\" = 200 ] && echo READY && exit 0; "
+        f"  sleep 1; "
+        f"done; echo NOT_READY; ps -ef | grep -i 'uvicorn .*main:app' | grep -v grep; "
+        f"ss -ltnp | grep ':8000' || true; "
+        f"tail -n 200 /tmp/uvicorn.log || true; exit 1"
     )
     print(f"[{host}] Waiting for app to become ready …")
     r = ssh(host, ready_cmd)
