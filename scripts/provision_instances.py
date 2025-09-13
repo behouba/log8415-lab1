@@ -47,8 +47,8 @@ def create_group(instance_type: str, count: int, cluster_tag: str):
         instances.extend(r)
     return instances
 
-print("Creating 5× t2.micro (cluster2) and 4× t2.large (cluster1)…")
-grp_micro = create_group("t2.micro", 5, "cluster2")
+print("Creating 4× t2.micro (cluster2) and 4× t2.large (cluster1)…")
+grp_micro = create_group("t2.micro", 4, "cluster2")
 grp_large = create_group("t2.large", 4, "cluster1")
 all_instances = grp_micro + grp_large
 
