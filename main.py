@@ -23,5 +23,13 @@ except botocore.exceptions.NoCredentialsError:
     print("Erreur: Les identifiants AWS ne sont pas configurés.")
     exit(1)
 
+# --- Creation d'une fonctions de recherche de groupe de securite ---
 
-
+def get_security_group_id(sg_name):
+    """Recherche l'ID d'un groupe de sécurité par son nom."""
+    try:
+        response = ec2_client.describe_security_groups(GroupNames=[sg_name])
+        return response['SecurityGroups'][0]['GroupId']
+    except botocore.exceptions.ClientError as e:
+        print(f"Erreur : Le groupe de sécurité '{sg_name}' n'a pas été trouvé. {e}")
+        return None
