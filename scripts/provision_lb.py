@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-import json, os, sys, time
-
-import urllib
+import json, os, sys, time, urllib.request
 import boto3
 from botocore.exceptions import ClientError
 
@@ -24,56 +22,45 @@ def ensure_sg(name, desc):
             Filters=[{"Name":"vpc-id","Values":[VPC_ID]}, {"Name":"group-name","Values":[name]}]
         )
         if r["SecurityGroups"]:
-            return r["SecurityGroups"][0]["GroupId"]
+            sg_id = r["SecurityGroups"][0]["GroupId"]
+            print(f"Found existing security group '{name}' with ID: {sg_id}")
+            return sg_id
     except ClientError:
         pass
+    print(f"Creating new security group '{name}'...")
     r = ec2.create_security_group(
         GroupName=name, Description=desc, VpcId=VPC_ID
     )
     return r["GroupId"]
 
-def allow_ingress_cidr(sg, port, cidr="0.0.0.0/0", proto="tcp"):
+def authorize_ingress(group_id, **kwargs):
     try:
-        ec2.authorize_security_group_ingress(
-            GroupId=sg, IpPermissions=[{
-                "IpProtocol": proto,
-                "FromPort": port, "ToPort": port,
-                "IpRanges": [{"CidrIp": cidr}]
-            }]
-        )
+        ec2.authorize_security_group_ingress(GroupId=group_id, IpPermissions=[kwargs])
     except ClientError as e:
         if e.response["Error"]["Code"] != "InvalidPermission.Duplicate":
             raise
 
-def allow_ingress_sg(dst_sg, port, src_sg, proto="tcp"):
-    try:
-        ec2.authorize_security_group_ingress(
-            GroupId=dst_sg, IpPermissions=[{
-                "IpProtocol": proto,
-                "FromPort": port, "ToPort": port,
-                "UserIdGroupPairs": [{"GroupId": src_sg}]
-            }]
-        )
-    except ClientError as e:
-        if e.response["Error"]["Code"] != "InvalidPermission.Duplicate":
-            raise
-
-print("Ensuring LB security group…")
+print("Ensuring LB security group 'lab-lb' exists and is configured...")
 LB_SG = ensure_sg("lab-lb", "Custom LB SG")
-allow_ingress_cidr(LB_SG, 80, "0.0.0.0/0")   # LB listens on 80
 
+# Rule 1: Allow HTTP traffic from anyone to the LB
+print(f"  - Authorizing inbound HTTP (port 80) from 0.0.0.0/0 on SG {LB_SG}")
+authorize_ingress(LB_SG, IpProtocol="tcp", FromPort=80, ToPort=80, IpRanges=[{"CidrIp": "0.0.0.0/0"}])
+
+# Rule 2: Allow SSH traffic from YOUR IP to the LB for deployment
 try:
-    my_ip = urllib.request.urlopen('https://checkip.amazonaws.com').read().decode('utf8').strip()
-    print(f"Allowing SSH (port 22) from IP: {my_ip}")
-    allow_ingress_cidr(LB_SG, 22, f"{my_ip}/32")
+    my_ip = urllib.request.urlopen('https://checkip.amazonaws.com', timeout=5).read().decode('utf8').strip()
+    print(f"  - Authorizing inbound SSH (port 22) from your IP ({my_ip}) on SG {LB_SG}")
+    authorize_ingress(LB_SG, IpProtocol="tcp", FromPort=22, ToPort=22, IpRanges=[{"CidrIp": f"{my_ip}/32"}])
 except Exception as e:
-    print(f"⚠️  Could not determine your public IP to allow SSH. You may need to add a rule for port 22 manually to the 'lab-lb' security group. Error: {e}")
+    print(f"⚠️  Could not determine public IP to allow SSH. You may need to add a rule for port 22 manually. Error: {e}")
 
-# Instances must allow 8000 from the LB SG:
-allow_ingress_sg(INST_SG, 8000, LB_SG)
+# Rule 3: Allow app instances to receive traffic from the LB
+print(f"  - Authorizing inbound traffic on port 8000 from LB SG ({LB_SG}) on App SG ({INST_SG})")
+authorize_ingress(INST_SG, IpProtocol="tcp", FromPort=8000, ToPort=8000, UserIdGroupPairs=[{"GroupId": LB_SG}])
 
-print("Launching LB instance (t2.micro, Ubuntu 22.04)…")
-inst = ec2r.create_instances(
+print("\nLaunching LB instance (t2.micro, Ubuntu 22.04)...")
+inst_list = ec2r.create_instances(
     ImageId=AMI, InstanceType="t2.micro", MinCount=1, MaxCount=1,
     KeyName=KEY,
     NetworkInterfaces=[{
@@ -86,9 +73,13 @@ inst = ec2r.create_instances(
         "ResourceType":"instance",
         "Tags":[{"Key":"Name","Value":"lab-lb-instance"}, {"Key":"Role","Value":"lb"}]
     }]
-)[0]
+)
+inst = inst_list[0]
 
-inst.wait_until_running(); inst.load()
+print(f"Waiting for LB instance {inst.id} to start...")
+inst.wait_until_running()
+inst.load()
+
 data = {
   "id": inst.id,
   "public_ip": inst.public_ip_address,
@@ -99,4 +90,4 @@ os.makedirs("artifacts", exist_ok=True)
 with open("artifacts/lb.json","w") as f:
     json.dump(data, f, indent=2)
 
-print(f"✅ LB instance ready: {data['public_ip']} (sg {LB_SG})")
+print(f"✅ LB instance ready: {data['public_ip']} (ID: {data['id']})")

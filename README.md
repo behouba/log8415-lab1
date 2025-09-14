@@ -47,3 +47,24 @@ aws ec2 authorize-security-group-ingress \
 # (optional) see the rules, to confirm the new /32 was added
 aws ec2 describe-security-groups --group-ids "$AWS_INSTANCE_SG_ID" \
   --region "$AWS_REGION" --query 'SecurityGroups[0].IpPermissions'
+
+
+
+
+
+
+
+
+
+  # Python upgrate
+  # Install pyenv in home
+curl https://pyenv.run | bash
+
+# Add to shell init (if using bash)
+export PATH="$HOME/.pyenv/bin:$PATH"
+eval "$(pyenv init -)"
+
+# Install python 3.11 locally
+pyenv install 3.11.9
+pyenv local 3.11.9
+

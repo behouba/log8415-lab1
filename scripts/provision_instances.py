@@ -15,6 +15,7 @@ ec2 = boto3.resource("ec2", region_name=REGION)
 ssm = boto3.client("ssm", region_name=REGION)
 
 if not AMI_ID:
+    print("AMI_ID not found in environment, resolving from AWS SSM...")
     try:
         AMI_ID = ssm.get_parameter(
             Name="/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
@@ -23,13 +24,15 @@ if not AMI_ID:
         AMI_ID = ssm.get_parameter(
             Name="/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
         )["Parameter"]["Value"]
+    print(f"Using Ubuntu 22.04 AMI: {AMI_ID}")
 
 def create_group(instance_type: str, count: int, cluster_tag: str):
-    rr = itertools.cycle(SUBNETS)
+    subnet_cycle = itertools.cycle(SUBNETS)
     instances = []
+    print(f"Creating {count} x {instance_type} instance(s) for {cluster_tag}...")
     for _ in range(count):
-        subnet = next(rr)
-        r = ec2.create_instances(
+        subnet = next(subnet_cycle)
+        instance_group = ec2.create_instances(
             ImageId=AMI_ID,
             InstanceType=instance_type,
             MinCount=1, MaxCount=1,
@@ -48,36 +51,36 @@ def create_group(instance_type: str, count: int, cluster_tag: str):
                 ],
             }],
         )
-        instances.extend(r)
+        instances.extend(instance_group)
     return instances
 
-print("Creating 4× t2.micro (cluster2) and 4× t2.large (cluster1)…")
-grp_micro = create_group("t2.micro", 4, "cluster2")
+print("Creating 4 x t2.large (cluster1) and 4 x t2.micro (cluster2)...")
 grp_large = create_group("t2.large", 4, "cluster1")
-all_instances = grp_micro + grp_large
+grp_micro = create_group("t2.micro", 4, "cluster2")
+all_instances = grp_large + grp_micro
 
+print("\nWaiting for all instances to enter the 'running' state...")
 for i in all_instances:
-    print(f"⏱ Waiting for {i.id}…")
+    print(f"  ⏱  Waiting for {i.id} ({i.instance_type})...")
     i.wait_until_running()
-    i.load()
+    i.load() # Refresh instance attributes like public_ip_address
 
-out = []
+print("\n✅ All instances are running. Details:")
+output_data = []
 for i in all_instances:
-    cluster = None
-    print(f"✅ {i.id} {i.instance_type} {i.state['Name']} {i.public_ip_address} {i.private_ip_address}")
-    for t in (i.tags or []):
-        if t.get("Key") == "Cluster":
-            cluster = t["Value"]
-    out.append({
+    cluster_tag = next((tag['Value'] for tag in (i.tags or []) if tag.get("Key") == "Cluster"), "unknown")
+    print(f"  - {i.id} | {i.instance_type} | {cluster_tag} | {i.public_ip_address}")
+    output_data.append({
         "id": i.id,
         "type": i.instance_type,
         "state": i.state["Name"],
         "public_ip": i.public_ip_address,
         "private_ip": i.private_ip_address,
-        "cluster": cluster,
+        "cluster": cluster_tag,
     })
 
 os.makedirs("artifacts", exist_ok=True)
 with open("artifacts/instances.json", "w") as f:
-    json.dump(out, f, indent=2)
-print("✅ Wrote artifacts/instances.json with instance IDs and IPs.")
+    json.dump(output_data, f, indent=2)
+print("\n✅ Wrote instance details to artifacts/instances.json.")
+
