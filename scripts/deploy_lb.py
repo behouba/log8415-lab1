@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-import json, os, sys, subprocess, base64, pathlib
+import json, os, sys, subprocess, base64
 
-REGION = os.getenv("AWS_REGION", "us-east-1")
 KEY_PATH = os.getenv("AWS_KEY_PATH")
 if not KEY_PATH:
     sys.exit("Missing AWS_KEY_PATH")
 
-SSH_BASE = [
+SSH_OPTS = [
     "ssh",
     "-o","StrictHostKeyChecking=no",
     "-o","BatchMode=yes",
@@ -17,9 +16,9 @@ SSH_BASE = [
 ]
 
 def ssh(host, cmd):
-    remote = f"bash -lc '{cmd}'"
+    """Run a remote command via non-interactive bash."""
     return subprocess.run(
-        SSH_BASE + ["-i", KEY_PATH, f"ubuntu@{host}", remote],
+        SSH_OPTS + ["-i", KEY_PATH, f"ubuntu@{host}", f"bash -lc '{cmd}'"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
     )
 
@@ -29,9 +28,10 @@ def scp_path(host, local, remote_home="~"):
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
     )
 
-# Load targets from artifacts/instances.json (use **private** IPs)
+# -------- targets & host --------
 with open("artifacts/instances.json") as f:
     instances = json.load(f)
+
 targets = {
     "cluster1": [f"http://{i['private_ip']}:8000/cluster1" for i in instances if i.get("cluster")=="cluster1"],
     "cluster2": [f"http://{i['private_ip']}:8000/cluster2" for i in instances if i.get("cluster")=="cluster2"],
@@ -43,57 +43,36 @@ HOST = lb["public_ip"]
 
 print(f"Deploying LB to {HOST} …")
 
-# cloud-init can hold dpkg/apt locks for ~1–3 min on first boot.
-# Wait for it (non-fatal if cloud-init is absent) before apt work.
-for c in [
-    "sudo cloud-init status --wait || true",
-]:
-    print(f"[{HOST}] $ {c}")
-    r = ssh(HOST, c)
-    if r.returncode != 0:
-        print(r.stdout); sys.exit(f"[{HOST}] Failed: {c}")
+# -------- NO APT, NO CLOUD-INIT WAITS --------
+# 1) Make sure Python is there; bootstrap pip without apt; install deps.
+bootstrap = (
+    "set -eu;"
+    "python3 -V || (echo 'python3 missing' >&2; exit 1); "
+    # ensurepip is bundled with CPython; harmless if already installed
+    "python3 -m ensurepip --upgrade || true; "
+    "python3 -m pip install --upgrade pip || true; "
+    "python3 -m pip install -q fastapi uvicorn httpx || (python3 -m pip install fastapi uvicorn httpx)"
+)
+print(f"[{HOST}] $ bootstrap python/pip/deps (no apt)")
+r = ssh(HOST, bootstrap)
+if r.returncode != 0:
+    print(r.stdout); sys.exit(f"[{HOST}] Failed to bootstrap Python/pip")
 
-apt_fix = "sudo rm -f /etc/apt/apt.conf.d/50command-not-found || true"
-fix_lists = "sudo rm -rf /var/lib/apt/lists/* && sudo mkdir -p /var/lib/apt/lists/partial && sudo apt-get clean"
-
-# Use a hard timeout so we never hang indefinitely on slow mirrors/locks.
-for c in [
-    f"{apt_fix}; sudo timeout 180 apt-get update -y || ({fix_lists} && sudo timeout 180 apt-get update -y) || true",
-    "sudo DEBIAN_FRONTEND=noninteractive timeout 300 apt-get install -y --no-install-recommends python3 python3-pip curl",
-    "mkdir -p ~/lb /etc/lb && rm -rf ~/lb/*",
-]:
-    print(f"[{HOST}] $ {c}")
-    r = ssh(HOST, c)
-    if r.returncode != 0:
-        print(r.stdout); sys.exit(f"[{HOST}] Failed: {c}")
-
-
-# Copy code
+# 2) Place code & config
 print(f"[{HOST}] Copying lb/ …")
 r = scp_path(HOST, "lb")
 if r.returncode != 0:
     print(r.stdout); sys.exit(f"[{HOST}] SCP failed (lb)")
 
-# Write targets.json
 print(f"[{HOST}] Writing /etc/lb/targets.json")
 targets_b64 = base64.b64encode(json.dumps(targets).encode("utf-8")).decode("ascii")
-r = ssh(HOST, f"echo '{targets_b64}' | base64 -d | sudo tee /etc/lb/targets.json >/dev/null")
+r = ssh(HOST, f"sudo mkdir -p /etc/lb && echo '{targets_b64}' | base64 -d | sudo tee /etc/lb/targets.json >/dev/null")
 if r.returncode != 0:
     print(r.stdout); sys.exit(f"[{HOST}] Failed writing targets.json")
 
-# Python deps
-for c in [
-    "python3 -m pip install --upgrade pip",
-    "python3 -m pip install fastapi uvicorn httpx",
-]:
-    print(f"[{HOST}] $ {c}")
-    r = ssh(HOST, c)
-    if r.returncode != 0:
-        print(r.stdout); sys.exit(f"[{HOST}] Failed: {c}")
-
-# systemd unit (port 80, capability to bind low port)
+# 3) systemd unit (give CAP_NET_BIND_SERVICE so non-root can bind :80)
 SERVICE_PATH = "/etc/systemd/system/lb.service"
-SERVICE_TPL = f"""[Unit]
+SERVICE_TPL = """[Unit]
 Description=Custom Latency-based LB
 After=network.target
 
@@ -106,6 +85,7 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 ExecStart=/usr/bin/python3 -m uvicorn lb:app --host 0.0.0.0 --port 80
 Restart=always
 RestartSec=2
+TimeoutStartSec=30
 
 [Install]
 WantedBy=multi-user.target
@@ -115,19 +95,32 @@ cmd = (
     f"echo '{unit_b64}' | base64 -d | sudo tee {SERVICE_PATH} >/dev/null && "
     "sudo systemctl daemon-reload && "
     "sudo systemctl enable --now lb && "
-    "sudo systemctl restart lb"
+    "sudo systemctl restart lb || true"
 )
 print(f"[{HOST}] install systemd unit")
 r = ssh(HOST, cmd)
 if r.returncode != 0:
     print(r.stdout); sys.exit(f"[{HOST}] Failed to install/start lb.service")
 
-# Readiness
+# 4) Readiness check with Python (no curl)
 ready = (
-    "for i in $(seq 1 30); do "
-    "code=$(curl -s -o /dev/null -w %{http_code} http://127.0.0.1/status); "
-    "[ \"$code\" = 200 ] && echo READY && exit 0; sleep 1; done; "
-    "echo NOT_READY; systemctl --no-pager --full status lb || true; journalctl -u lb -n 120 --no-pager || true; exit 1"
+    "set -e; "
+    "for i in $(seq 1 45); do "
+    "  python3 - <<'PY'\n"
+    "import sys, urllib.request\n"
+    "try:\n"
+    "    with urllib.request.urlopen('http://127.0.0.1/status', timeout=2) as r:\n"
+    "        sys.exit(0 if r.getcode()==200 else 1)\n"
+    "except Exception:\n"
+    "    sys.exit(1)\n"
+    "PY\n"
+    "  && echo READY && exit 0 || true; "
+    "  sleep 1; "
+    "done; "
+    "echo NOT_READY; "
+    "systemctl --no-pager --full status lb || true; "
+    "journalctl -u lb -n 120 --no-pager || true; "
+    "exit 1"
 )
 print(f"[{HOST}] waiting for readiness …")
 r = ssh(HOST, ready)
