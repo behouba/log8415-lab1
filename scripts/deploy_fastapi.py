@@ -57,7 +57,7 @@ WantedBy=multi-user.target
 
 
 def deploy_one(host: str, cluster: str):
-    print(f"Deploying to {host} ({cluster}) as {SSH_USER}")
+    print(f"\nDeploying to {host} ({cluster}) as {SSH_USER}")
 
     apt_prep = "sudo rm -f /etc/apt/apt.conf.d/50command-not-found || true"
     fix_lists = "sudo rm -rf /var/lib/apt/lists/* && sudo mkdir -p /var/lib/apt/lists/partial && sudo apt-get clean"
