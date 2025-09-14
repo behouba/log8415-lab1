@@ -41,20 +41,32 @@ with open("artifacts/lb.json") as f:
     lb = json.load(f)
 HOST = lb["public_ip"]
 
-print(f"🚀 Deploying LB to {HOST}")
+print(f"Deploying LB to {HOST} …")
+
+# cloud-init can hold dpkg/apt locks for ~1–3 min on first boot.
+# Wait for it (non-fatal if cloud-init is absent) before apt work.
+for c in [
+    "sudo cloud-init status --wait || true",
+]:
+    print(f"[{HOST}] $ {c}")
+    r = ssh(HOST, c)
+    if r.returncode != 0:
+        print(r.stdout); sys.exit(f"[{HOST}] Failed: {c}")
 
 apt_fix = "sudo rm -f /etc/apt/apt.conf.d/50command-not-found || true"
 fix_lists = "sudo rm -rf /var/lib/apt/lists/* && sudo mkdir -p /var/lib/apt/lists/partial && sudo apt-get clean"
 
+# Use a hard timeout so we never hang indefinitely on slow mirrors/locks.
 for c in [
-    f"{apt_fix}; sudo apt-get update -y || ({fix_lists} && sudo apt-get update -y) || true",
-    "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-pip curl",
+    f"{apt_fix}; sudo timeout 180 apt-get update -y || ({fix_lists} && sudo timeout 180 apt-get update -y) || true",
+    "sudo DEBIAN_FRONTEND=noninteractive timeout 300 apt-get install -y --no-install-recommends python3 python3-pip curl",
     "mkdir -p ~/lb /etc/lb && rm -rf ~/lb/*",
 ]:
     print(f"[{HOST}] $ {c}")
     r = ssh(HOST, c)
     if r.returncode != 0:
         print(r.stdout); sys.exit(f"[{HOST}] Failed: {c}")
+
 
 # Copy code
 print(f"[{HOST}] Copying lb/ …")
