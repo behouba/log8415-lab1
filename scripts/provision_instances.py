@@ -57,12 +57,14 @@ grp_large = create_group("t2.large", 4, "cluster1")
 all_instances = grp_micro + grp_large
 
 for i in all_instances:
+    print(f"⏱ Waiting for {i.id}…")
     i.wait_until_running()
     i.load()
 
 out = []
 for i in all_instances:
     cluster = None
+    print(f"✅ {i.id} {i.instance_type} {i.state['Name']} {i.public_ip_address} {i.private_ip_address}")
     for t in (i.tags or []):
         if t.get("Key") == "Cluster":
             cluster = t["Value"]
