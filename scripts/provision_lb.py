@@ -59,9 +59,9 @@ except Exception as e:
 print(f"  - Authorizing inbound traffic on port 8000 from LB SG ({LB_SG}) on App SG ({INST_SG})")
 authorize_ingress(INST_SG, IpProtocol="tcp", FromPort=8000, ToPort=8000, UserIdGroupPairs=[{"GroupId": LB_SG}])
 
-print("\nLaunching LB instance (t2.micro, Ubuntu 22.04)...")
+print("\nLaunching LB instance (t2.large, Ubuntu 22.04)...")
 inst_list = ec2r.create_instances(
-    ImageId=AMI, InstanceType="t2.micro", MinCount=1, MaxCount=1,
+    ImageId=AMI, InstanceType="t2.large", MinCount=1, MaxCount=1,
     KeyName=KEY,
     NetworkInterfaces=[{
         "DeviceIndex": 0,

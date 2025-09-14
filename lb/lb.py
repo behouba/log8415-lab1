@@ -117,14 +117,21 @@ async def status():
     snap = await state.snapshot()
     return JSONResponse(snap)
 
+
 async def forward(url: str) -> Response:
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url, timeout=TIMEOUT)
-        return Response(
-            content=r.content,
-            status_code=r.status_code,
-            media_type=r.headers.get("content-type", "application/json")
-        )
+    try: # <--- ADD THIS
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, timeout=TIMEOUT)
+            return Response(
+                content=r.content,
+                status_code=r.status_code,
+                media_type=r.headers.get("content-type", "application/json")
+            )
+    except httpx.RequestError as e:
+        # This catches connection errors, timeouts, etc.
+        error_content = {"error": "Gateway Error", "detail": str(e)}
+        return JSONResponse(status_code=503, content=error_content)
+
 
 @app.get("/cluster1")
 async def cluster1():
