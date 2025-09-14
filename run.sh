@@ -15,6 +15,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip > /dev/null
 pip install boto3 > /dev/null
+pip install aiohttp > /dev/null
 echo "✅ Dependencies installed."
 
 # Provision application instances (4 micro, 4 large)
