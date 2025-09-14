@@ -47,7 +47,7 @@ print(f"Deploying LB to {HOST} …")
 # 1) Make sure Python is there; bootstrap pip without apt; install deps.
 bootstrap = (
     "set -eu;"
-    "python3 -V || (echo 'python3 missing' >&2; exit 1); "
+    "python3 -V || (echo 'python3 missing' >&2; exit 1)"
     # ensurepip is bundled with CPython; harmless if already installed
     "python3 -m ensurepip --upgrade || true; "
     "python3 -m pip install --upgrade pip || true; "
