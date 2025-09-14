@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Require modern Python for boto3
-PYV=$(python3 - <<'PY'
-import sys
-print(f"{sys.version_info.major}.{sys.version_info.minor}")
-PY
-)
-req="3.8"
-awk 'BEGIN{exit !(ARGV[1]>=ARGV[2])}' "$PYV" "$req" || {
-  echo "Python $req+ required on your machine (found $PYV). Please use Python 3.8+." >&2
-  exit 1
-}
 
 # Ensure env is loaded
 if [ ! -f .env ]; then
