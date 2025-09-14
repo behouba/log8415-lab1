@@ -10,7 +10,7 @@ def find_instances():
     ids = set()
     def grab(filters):
         try:
-            r = ec2.describe-instances(Filters=filters)
+            r = ec2.describe_instances(Filters=filters)
             for res in r.get("Reservations", []):
                 for i in res.get("Instances", []):
                     ids.add(i["InstanceId"])
@@ -48,7 +48,7 @@ def terminate_and_wait(ids):
 
 def sg_id_by_name(vpc_id, name):
     try:
-        r = ec2.describe-security-groups(
+        r = ec2.describe_security_groups(
             Filters=([{"Name":"vpc-id","Values":[vpc_id]}] if vpc_id else []) +
                     [{"Name":"group-name","Values":[name]}]
         )
