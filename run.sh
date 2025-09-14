@@ -1,9 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Require modern Python for boto3
+PYV=$(python3 - <<'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)
+req="3.8"
+awk 'BEGIN{exit !(ARGV[1]>=ARGV[2])}' "$PYV" "$req" || {
+  echo "Python $req+ required on your machine (found $PYV). Please use Python 3.8+." >&2
+  exit 1
+}
+
 # Ensure env is loaded
 if [ ! -f .env ]; then
-  echo "No .env found. Run: scripts/bootstrap_env.sh && set -a; source .env; set +a"
+  echo "No .env found."
+  echo "Run: scripts/bootstrap_env.sh && set -a; source .env; set +a"
   exit 1
 fi
 set -a; source .env; set +a
@@ -13,13 +26,19 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip boto3
 
-# 1) Provision EC2 (Ubuntu 22.04) – 5× micro, 4× large
+# 4× micro (cluster2) + 4× large (cluster1)
 python scripts/provision_instances.py
 
-# 2) Deploy FastAPI app to each instance and start uvicorn
+# Deploy FastAPI to all instances
 python scripts/deploy_fastapi.py
 
-# 3) Create (or reuse) ALB + two target groups + path rules /cluster1 and /cluster2
-python scripts/create_alb.py
+# Provision & deploy the custom latency-based LB (Option 1)
+python scripts/provision_lb.py
+python scripts/deploy_lb.py
 
-echo "All done. See artifacts/instances.json and artifacts/alb.json."
+echo
+echo "All done ✅"
+echo "Instances: artifacts/instances.json"
+echo "LB:        artifacts/lb.json"
+LB=$(jq -r '.public_ip' artifacts/lb.json)
+echo "Try:       curl -s http://$LB/cluster1 ; curl -s http://$LB/cluster2"

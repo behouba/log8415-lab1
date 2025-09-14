@@ -2,7 +2,6 @@
 set -euo pipefail
 
 err() { echo "ERROR: $*" >&2; exit 1; }
-
 region_from_cli() { aws configure get region || true; }
 
 authorize_cidr() {
@@ -12,18 +11,6 @@ authorize_cidr() {
   out=$(aws ec2 authorize-security-group-ingress \
         --group-id "$sg" --protocol "$proto" --port "$port" \
         --cidr "$cidr" --region "$AWS_REGION" 2>&1)
-  rc=$?
-  set -e
-  [[ $rc -eq 0 || "$out" == *"InvalidPermission.Duplicate"* ]] || { echo "$out" >&2; return $rc; }
-}
-
-authorize_sg() {
-  local sg="$1" port="$2" source_sg="$3" proto="${4:-tcp}"
-  local out rc
-  set +e
-  out=$(aws ec2 authorize-security-group-ingress \
-        --group-id "$sg" --protocol "$proto" --port "$port" \
-        --source-group "$source_sg" --region "$AWS_REGION" 2>&1)
   rc=$?
   set -e
   [[ $rc -eq 0 || "$out" == *"InvalidPermission.Duplicate"* ]] || { echo "$out" >&2; return $rc; }
@@ -55,22 +42,15 @@ ensure_key_pair() {
     path="$HOME/.ssh/${name}.pem"
     export AWS_KEY_PATH="$path"
   fi
-
   local exists
   set +e
   exists=$(aws ec2 describe-key-pairs --key-names "$name" \
             --query 'KeyPairs[0].KeyName' --output text --region "$AWS_REGION" 2>/dev/null)
   set -e
-
   if [[ "$exists" == "$name" ]]; then
-    if [[ ! -f "$path" ]]; then
-      echo "WARN: Key pair '$name' exists in AWS but local PEM missing at $path."
-      echo "      Recreating local PEM from AWS is not possible; consider a NEW key name."
-    fi
-    chmod 600 "$path" 2>/dev/null || true
+    [[ -f "$path" ]] && chmod 600 "$path" || true
     echo "$name"; return 0
   fi
-
   mkdir -p "$(dirname "$path")"
   aws ec2 create-key-pair --key-name "$name" \
     --query 'KeyMaterial' --output text --region "$AWS_REGION" > "$path"
@@ -102,24 +82,20 @@ if [[ -z "${AWS_SUBNET_IDS:-}" ]]; then
 fi
 echo "Subnets: $AWS_SUBNET_IDS"
 
-# ---- Security Groups (idempotent) ----
-AWS_ALB_SG_ID=${AWS_ALB_SG_ID:-$(ensure_sg "lab-alb" "ALB SG")}
+# ---- Instance Security Group (idempotent) ----
 AWS_INSTANCE_SG_ID=${AWS_INSTANCE_SG_ID:-$(ensure_sg "lab-instances" "Instances SG")}
-echo "ALB SG: $AWS_ALB_SG_ID"
 echo "Instance SG: $AWS_INSTANCE_SG_ID"
 
-# ALB: HTTP/80 from anywhere
-authorize_cidr "$AWS_ALB_SG_ID" 80 "0.0.0.0/0"
-# Instances: SSH/22 from your IP; 8000 from ALB SG
+# SSH/22 from your IP
 MYIP=$(curl -s https://checkip.amazonaws.com | tr -d '\r' || true)
 if [[ -n "$MYIP" ]]; then
   authorize_cidr "$AWS_INSTANCE_SG_ID" 22 "${MYIP}/32"
 else
   echo "WARN: Could not detect public IP; skipping SSH rule."
 fi
-authorize_sg "$AWS_INSTANCE_SG_ID" 8000 "$AWS_ALB_SG_ID"
+# NOTE: port 8000 ingress from the LB SG is added later by scripts/provision_lb.py
 
-# ---- Key pair (idempotent; prefer a fresh name if unsure) ----
+# ---- Key pair ----
 ensure_key_pair >/dev/null
 echo "Key pair: $AWS_KEY_NAME ($AWS_KEY_PATH)"
 
@@ -144,7 +120,6 @@ cat > .env <<EOF
 AWS_REGION=$AWS_REGION
 AWS_VPC_ID=$AWS_VPC_ID
 AWS_SUBNET_IDS=$AWS_SUBNET_IDS
-AWS_ALB_SG_ID=$AWS_ALB_SG_ID
 AWS_INSTANCE_SG_ID=$AWS_INSTANCE_SG_ID
 AWS_KEY_NAME=$AWS_KEY_NAME
 AWS_KEY_PATH=$AWS_KEY_PATH

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-# Teardown the infrastructure
-python scripts/teardown.py
+# One-button nuke using the tag-based Python teardown
+python scripts/teardown.py --confirm --purge
