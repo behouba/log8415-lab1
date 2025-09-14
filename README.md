@@ -28,20 +28,24 @@
 ### Step-by-Step Instructions
 
 ### Install python 3.11.9
-
-#### Install pyenv in home
+Install pyenv in home
+```bash
 curl https://pyenv.run | bash
-
+```
+    
 #### Add to shell init
+```bash
 export PATH="$HOME/.pyenv/bin:$PATH"
 eval "$(pyenv init -)"
+```
 
-#### Install python 3.11 locally
+Install python 3.11 locally
+```bash
 pyenv install 3.11.9
 pyenv local 3.11.9
+```
 
-### Make bash scripts executable
-
+Make bash scripts executable
 ```bash
 chmod +x ./scripts/*.sh && chmod +x ./*.sh
 ```
