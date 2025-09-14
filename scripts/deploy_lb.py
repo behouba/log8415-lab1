@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, sys, subprocess, base64
+import json, os, sys, subprocess, base64, time
 
 KEY_PATH = os.getenv("AWS_KEY_PATH")
 if not KEY_PATH:
@@ -27,6 +27,8 @@ with open("artifacts/instances.json") as f:
 with open("artifacts/lb.json") as f:
     lb = json.load(f)
 
+print("Waiting 60 seconds for the new instance to initialize its SSH service...")
+time.sleep(60)
 HOST = lb["public_ip"]
 targets = {
     "cluster1": [f"http://{i['private_ip']}:8000/cluster1" for i in instances if i.get("cluster")=="cluster1"],
