@@ -56,9 +56,20 @@ def allow_ingress_sg(dst_sg, port, src_sg, proto="tcp"):
         if e.response["Error"]["Code"] != "InvalidPermission.Duplicate":
             raise
 
+def allow_all_egress(sg):
+    try:
+        ec2.authorize_security_group_egress(
+            GroupId=sg,
+            IpPermissions=[{"IpProtocol":"-1","IpRanges":[{"CidrIp":"0.0.0.0/0"}]}]
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] not in ("InvalidPermission.Duplicate","InvalidPermission.NotFound"):
+            raise
+
 print("Ensuring LB security group…")
 LB_SG = ensure_sg("lab-lb", "Custom LB SG")
 allow_ingress_cidr(LB_SG, 80, "0.0.0.0/0")   # LB listens on 80
+allow_all_egress(LB_SG)                      # LB can reach anywhere
 # Instances must allow 8000 from the LB SG:
 allow_ingress_sg(INST_SG, 8000, LB_SG)
 
