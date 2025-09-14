@@ -50,7 +50,9 @@ try:
 
     print(f"[{HOST}] Writing /etc/lb/targets.json configuration...")
     targets_b64 = base64.b64encode(json.dumps(targets).encode("utf-8")).decode("ascii")
-    ssh(HOST, f"echo '{targets_b64}' | base64 -d | sudo tee /etc/lb/targets.json >/dev/null")
+    ssh(HOST, f"sudo mkdir -p /etc/lb && sudo touch /etc/lb/targets.json && echo '{targets_b64}' | base64 -d | sudo tee /etc/lb/targets.json >/dev/null")
+
+  
 
     print(f"[{HOST}] Creating and starting systemd service for the LB...")
     SERVICE_TPL = """[Unit]
