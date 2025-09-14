@@ -45,14 +45,11 @@ After=network.target
 User=ubuntu
 WorkingDirectory=/home/ubuntu/app
 Environment=CLUSTER_NAME={cluster}
-ExecStartPre=/usr/bin/bash -lc 'pkill -f "uvicorn .*main:app" || true'
-ExecStartPre=/usr/bin/bash -lc 'fuser -k 8000/tcp || true'
+ExecStartPre=/bin/bash -lc 'fuser -k 8000/tcp || true'
 ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=2
-
-# StandardOutput=append:/var/log/fastapi.log
-# StandardError=append:/var/log/fastapi.log
+TimeoutStartSec=30
 
 [Install]
 WantedBy=multi-user.target
