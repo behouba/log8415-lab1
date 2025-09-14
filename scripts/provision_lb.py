@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import json, os, sys, time
+
+import urllib
 import boto3
 from botocore.exceptions import ClientError
 
@@ -56,20 +58,17 @@ def allow_ingress_sg(dst_sg, port, src_sg, proto="tcp"):
         if e.response["Error"]["Code"] != "InvalidPermission.Duplicate":
             raise
 
-def allow_all_egress(sg):
-    try:
-        ec2.authorize_security_group_egress(
-            GroupId=sg,
-            IpPermissions=[{"IpProtocol":"-1","IpRanges":[{"CidrIp":"0.0.0.0/0"}]}]
-        )
-    except ClientError as e:
-        if e.response["Error"]["Code"] not in ("InvalidPermission.Duplicate","InvalidPermission.NotFound"):
-            raise
-
 print("Ensuring LB security group…")
 LB_SG = ensure_sg("lab-lb", "Custom LB SG")
 allow_ingress_cidr(LB_SG, 80, "0.0.0.0/0")   # LB listens on 80
-allow_all_egress(LB_SG)                      # LB can reach anywhere
+
+try:
+    my_ip = urllib.request.urlopen('https://checkip.amazonaws.com').read().decode('utf8').strip()
+    print(f"Allowing SSH (port 22) from IP: {my_ip}")
+    allow_ingress_cidr(LB_SG, 22, f"{my_ip}/32")
+except Exception as e:
+    print(f"⚠️  Could not determine your public IP to allow SSH. You may need to add a rule for port 22 manually to the 'lab-lb' security group. Error: {e}")
+
 # Instances must allow 8000 from the LB SG:
 allow_ingress_sg(INST_SG, 8000, LB_SG)
 
