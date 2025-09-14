@@ -1,19 +1,5 @@
 # LOG8415E - Lab 1: Load balancer from scratch
 
-## Prerequisites
-
-### Install pyenv in home
-curl https://pyenv.run | bash
-
-### Add to shell init
-export PATH="$HOME/.pyenv/bin:$PATH"
-eval "$(pyenv init -)"
-
-### Install python 3.11 locally
-pyenv install 3.11.9
-pyenv local 3.11.9
-
-
 ## File structure
 
 ```
@@ -39,18 +25,28 @@ pyenv local 3.11.9
 └── README.md               # This file
 ```
 
-## How to run
-
-### Prerequisites
-
-1.  **AWS Account:** An AWS account with programmatic access (Access Key ID and Secret Access Key).
-2.  **AWS CLI:** The AWS Command Line Interface must be installed.
-3.  **Configuration:** Your AWS credentials must be configured. Run `aws configure` and provide your credentials and a default region (e.g., `us-east-1`).
-4.  **Required Tools:** The control machine must have `python3`, `pip`, `curl`, and `jq` installed.
-
 ### Step-by-Step Instructions
 
-#### Step 1: Bootstrap Environment (Run Once)
+### Install python 3.11.9
+
+#### Install pyenv in home
+curl https://pyenv.run | bash
+
+#### Add to shell init
+export PATH="$HOME/.pyenv/bin:$PATH"
+eval "$(pyenv init -)"
+
+#### Install python 3.11 locally
+pyenv install 3.11.9
+pyenv local 3.11.9
+
+### Make bash scripts executable
+
+```bash
+chmod +x ./scripts/*.sh && chmod +x ./*.sh
+```
+
+#### Bootstrap Environment (Run Once)
 
 This script creates the necessary AWS resources that persist between deployments, such as the EC2 Key Pair and the main Security Group. It also creates a `.env` file to store the IDs of these resources.
 
@@ -58,17 +54,57 @@ This script creates the necessary AWS resources that persist between deployments
 ./scripts/bootstrap_env.sh
 ```
 
-#### Step 2: Deploy the Entire Infrastructure
+#### Deploy the Entire Infrastructure
 
-This is the master script that provisions all instances, deploys the applications, configures the load balancer, and brings the entire system online.
+This is the script that provisions all instances, deploys the applications, configures the load balancer, and brings the entire system online.
 
 ```bash
 ./run.sh
 ```
 
+Or step by step:
+
+```bash
+set -euo pipefail
+```
+
+Load environment variables
+```bash
+set -a; source .env; set +a
+```
+
+Setting up Python virtual environment and installing dependencies...
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip > /dev/null
+pip install boto3 > /dev/null
+pip install aiohttp > /dev/null
+```
+
+Provision application instances (4 micro, 4 large)
+```bash
+python scripts/provision_instances.py
+```
+
+Deploy FastAPI application to all instances
+```bash
+python scripts/deploy_fastapi.py
+```
+
+Provision the custom latency-based Load Balancer
+```bash
+python scripts/provision_lb.py
+```
+
+Deploy the Load Balancer application
+```bash
+python scripts/deploy_lb.py
+```
+
 Upon successful completion, the script will output the public IP address of the load balancer.
 
-#### Step 3: Test the System
+#### Test the System
 
 You can manually verify that the system is working by sending requests to the cluster endpoints.
 
@@ -86,7 +122,7 @@ curl -s http://${LB_IP}/cluster2 ; echo
 curl -s http://${LB_IP}/status | jq
 ```
 
-#### Step 4: Run the Performance Benchmark
+#### Run the Performance Benchmark
 
 This script sends 1000 concurrent requests to each cluster and reports performance metrics like Requests Per Second (RPS) and average latency.
 
@@ -102,9 +138,9 @@ python scripts/benchmark.py http://${LB_IP}
 ```
 **Note:** The results of this benchmark are the primary data for the project analysis.
 
-#### Step 5: Destroy All Resources
+#### Destroy All Resources
 
-**This is a critical step to avoid incurring AWS costs.** The `stop.sh` script will automatically find and terminate all EC2 instances created by this project and delete the associated security groups and local artifacts.
+The `stop.sh` script will automatically find and terminate all EC2 instances created by this project and delete the associated security groups and local artifacts.
 
 ```bash
 ./stop.sh --confirm
