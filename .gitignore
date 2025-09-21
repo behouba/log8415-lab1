@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+.venv/
+
+# Local env & secrets
+.env
+*.pem
+
+# 
+artifacts/
+IGN
