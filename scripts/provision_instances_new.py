@@ -58,3 +58,10 @@ print("Creating 4 x t2.large (cluster1) and 4 x t2.micro (cluster2)...")
 grp_large = create_group("t2.large", 4, "cluster1")
 grp_micro = create_group("t2.micro", 4, "cluster2")
 all_instances = grp_large + grp_micro
+
+print("\nWaiting for all instances to enter the 'running' state...")
+for i in all_instances:
+    print(f"  ⏱  Waiting for {i.id} ({i.instance_type})...")
+    i.wait_until_running()
+    i.load() # Refresh instance attributes like public_ip_address
+
