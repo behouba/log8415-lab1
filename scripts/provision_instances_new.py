@@ -65,3 +65,21 @@ for i in all_instances:
     i.wait_until_running()
     i.load() # Refresh instance attributes like public_ip_address
 
+print("\n✅ All instances are running. Details:")
+output_data = []
+for i in all_instances:
+    cluster_tag = next((tag['Value'] for tag in (i.tags or []) if tag.get("Key") == "Cluster"), "unknown")
+    print(f"  - {i.id} | {i.instance_type} | {cluster_tag} | {i.public_ip_address}")
+    output_data.append({
+        "id": i.id,
+        "type": i.instance_type,
+        "state": i.state["Name"],
+        "public_ip": i.public_ip_address,
+        "private_ip": i.private_ip_address,
+        "cluster": cluster_tag,
+    })
+
+os.makedirs("artifacts", exist_ok=True)
+with open("artifacts/instances.json", "w") as f:
+    json.dump(output_data, f, indent=2)
+print("\n✅ Wrote instance details to artifacts/instances.json.")
