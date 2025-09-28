@@ -4,6 +4,18 @@ import aiohttp
 import time
 import sys
 
+async def call_endpoint(session, url, request_num):
+    try:
+        async with session.get(url) as response:
+            if response.status == 200:
+                return True
+            else:
+                print(f"Request {request_num}: Failed with status code {response.status}")
+                return False
+    except Exception as e:
+        print(f"Request {request_num}: Failed with exception {e}")
+        return False
+
 async def run_benchmark(base_url: str, cluster_path: str, num_requests: int):
     url = f"{base_url}{cluster_path}"
     print(f"\n--- Benchmarking {cluster_path} with {num_requests} requests ---")
