@@ -25,3 +25,31 @@ if not AMI_ID:
             Name="/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
         )["Parameter"]["Value"]
     print(f"Using Ubuntu 22.04 AMI: {AMI_ID}")
+
+def create_group(instance_type: str, count: int, cluster_tag: str):
+    subnet_cycle = itertools.cycle(SUBNETS)
+    instances = []
+    print(f"Creating {count} x {instance_type} instance(s) for {cluster_tag}...")
+    for _ in range(count):
+        subnet = next(subnet_cycle)
+        instance_group = ec2.create_instances(
+            ImageId=AMI_ID,
+            InstanceType=instance_type,
+            MinCount=1, MaxCount=1,
+            KeyName=KEY_NAME,
+            NetworkInterfaces=[{
+                "DeviceIndex": 0,
+                "SubnetId": subnet,
+                "AssociatePublicIpAddress": True,
+                "Groups": [SG_ID],
+            }],
+            TagSpecifications=[{
+                "ResourceType": "instance",
+                "Tags": [
+                    {"Key": "Name", "Value": f"lab-{cluster_tag}-{instance_type}"},
+                    {"Key": "Cluster", "Value": cluster_tag},
+                ],
+            }],
+        )
+        instances.extend(instance_group)
+    return instances
