@@ -84,3 +84,4 @@ with open("artifacts/instances.json", "w") as f:
     json.dump(output_data, f, indent=2)
 print("\n✅ Wrote instance details to artifacts/instances.json.")
 
+
