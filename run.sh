@@ -29,13 +29,13 @@ python scripts/provision_lb.py
 python scripts/deploy_lb.py
 
 echo
-echo "All done ✅"
+echo "Everything is ready! ✅"
 echo "--------------------------------------------------"
 echo "Application Instances: artifacts/instances.json"
 echo "Load Balancer:         artifacts/lb.json"
 LB_IP=$(jq -r '.public_ip' artifacts/lb.json)
 echo
-echo "To test your load balancer, run:"
+echo "Test the Load Balancer:"
 echo "curl -s http://$LB_IP/cluster1 ; echo"
 echo "curl -s http://$LB_IP/cluster2 ; echo"
 echo "--------------------------------------------------"

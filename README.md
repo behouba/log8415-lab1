@@ -140,9 +140,8 @@ pip install aiohttp
 # Run the benchmark
 python scripts/benchmark.py http://${LB_IP}
 ```
-**Note:** The results of this benchmark are the primary data for the project analysis.
 
-#### Destroy All Resources
+#### Cleanup
 
 The `stop.sh` script will automatically find and terminate all EC2 instances created by this project and delete the associated security groups and local artifacts.
 
